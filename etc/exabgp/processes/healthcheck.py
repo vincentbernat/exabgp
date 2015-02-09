@@ -52,7 +52,6 @@ import logging
 import logging.handlers
 import argparse
 import signal
-import errno
 import time
 import collections
 try:
@@ -67,12 +66,13 @@ try:
 except ImportError:
     # Other versions. This is not really an enum but this is OK for
     # what we want to do.
-    def Enum(*sequential):
+    def Enum (*sequential):
         return type(str("Enum"), (), dict(zip(sequential, sequential)))
 
 logger = logging.getLogger("healthcheck")
 
-def parse():
+
+def parse ():
     """Parse arguments"""
     parser = argparse.ArgumentParser(description=sys.modules[__name__].__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -156,6 +156,9 @@ def parse():
     g.add_argument("--community", metavar="COMMUNITY",
                    type=str, default=None,
                    help="announce IPs with the supplied community")
+    g.add_argument("--as-path", metavar="ASPATH",
+                   type=str, default=None,
+                   help="announce IPs with the supplied as-path")
     g.add_argument("--withdraw-on-down", action="store_true",
                    help="Instead of increasing the metric on health failure, withdraw the route")
 
@@ -177,15 +180,16 @@ def parse():
     if options.config is not None:
         # A configuration file has been provided. Read each line and
         # build an equivalent command line.
-        args = sum([ "--{0}".format(l.strip()).split("=", 1)
-                     for l in options.config.readlines()
-                     if not l.strip().startswith("#") and l.strip() ], [])
-        args = [ x.strip() for x in args ]
+        args = sum(["--{0}".format(l.strip()).split("=", 1)
+                    for l in options.config.readlines()
+                    if not l.strip().startswith("#") and l.strip()], [])
+        args = [x.strip() for x in args]
         args.extend(sys.argv[1:])
         options = parser.parse_args(args)
     return options
 
-def setup_logging(debug, silent, name, syslog_facility, syslog):
+
+def setup_logging (debug, silent, name, syslog_facility, syslog):
     """Setup logger"""
     logger.setLevel(debug and logging.DEBUG or logging.INFO)
     enable_syslog = syslog and not debug
@@ -200,8 +204,9 @@ def setup_logging(debug, silent, name, syslog_facility, syslog):
         else:
             healthcheck_name = "healthcheck"
         sh.setFormatter(logging.Formatter(
-            "{0}[{1}]: %(message)s".format(healthcheck_name,
-                                                    os.getpid())))
+            "{0}[{1}]: %(message)s".format(
+                healthcheck_name,
+                os.getpid())))
         logger.addHandler(sh)
     # To console
     if sys.stderr.isatty() and not silent:
@@ -210,7 +215,8 @@ def setup_logging(debug, silent, name, syslog_facility, syslog):
             "%(levelname)s[%(name)s] %(message)s"))
         logger.addHandler(ch)
 
-def loopback_ips(label):
+
+def loopback_ips (label):
     """Retrieve loopback IP addresses"""
     logger.debug("Retrieve loopback IP addresses")
     addresses = []
@@ -240,7 +246,8 @@ def loopback_ips(label):
     logger.debug("Loopback addresses: {0}".format(addresses))
     return addresses
 
-def setup_ips(ips, label):
+
+def setup_ips (ips, label):
     """Setup missing IP on loopback interface"""
     existing = set(loopback_ips(label))
     toadd = set(ips) - existing
@@ -250,13 +257,15 @@ def setup_ips(ips, label):
             cmd = ["ip", "address", "add", str(ip), "dev", "lo"]
             if label:
                 cmd += ["label", "lo:{0}".format(label)]
-            subprocess.check_call(cmd,
-                                  stdout = fnull, stderr = fnull)
+            subprocess.check_call(
+                cmd, stdout=fnull, stderr=fnull)
 
-def setpgrp_preexec_fn():
+
+def setpgrp_preexec_fn ():
     os.setpgrp()
 
-def check(cmd, timeout):
+
+def check (cmd,timeout):
     """Check the return code of the given command.
 
     :param cmd: command to execute. If :keyword:`None`, no command is executed.
@@ -266,14 +275,17 @@ def check(cmd, timeout):
     """
     if cmd is None:
         return True
+
     class Alarm(Exception):
         pass
-    def alarm_handler(signum, frame):
+
+    def alarm_handler (number, frame):  # pylint: disable=W0613
         raise Alarm()
+
     logger.debug("Checking command {0}".format(repr(cmd)))
-    p = subprocess.Popen(cmd, shell = True,
-                         stdout = subprocess.PIPE,
-                         stderr = subprocess.STDOUT,
+    p = subprocess.Popen(cmd, shell=True,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT,
                          preexec_fn=setpgrp_preexec_fn)
     if timeout:
         signal.signal(signal.SIGALRM, alarm_handler)
@@ -291,12 +303,12 @@ def check(cmd, timeout):
         logger.debug("Command was executed successfully {0} {1}".format(p.returncode, stdout))
         return True
     except Alarm:
-        logger.warn("Timeout ({0}) while running check command".format(timeout, cmd))
+        logger.warn("Timeout ({0}) while running check command {1}".format(timeout, cmd))
         os.killpg(p.pid, signal.SIGKILL)
         return False
 
-def loop(options):
 
+def loop (options):
     """Main loop."""
     states = Enum(
         "INIT",                 # Initial state
@@ -308,7 +320,7 @@ def loop(options):
     )
     state = states.INIT
 
-    def exabgp(target):
+    def exabgp (target):
         """Communicate new state to ExaBGP"""
         if target not in (states.UP, states.DOWN, states.DISABLED):
             return
@@ -327,12 +339,15 @@ def loop(options):
                 if options.community:
                     announce = "{0} community [ {1} ]".format(announce,
                                                               options.community)
+                if options.as_path:
+                    announce = "{0} as-path [ {1} ]".format(announce,
+                                                              options.as_path)
             logger.debug("exabgp: {0} {1}".format(command, announce))
             print("{0} {1}".format(command, announce))
             metric += options.increase
         sys.stdout.flush()
 
-    def trigger(target):
+    def trigger (target):
         """Trigger a state change and execute the appropriate commands"""
         # Shortcut for RISING->UP and FALLING->UP
         if target == states.RISING and options.rise <= 1:
@@ -348,10 +363,10 @@ def loop(options):
         for cmd in cmds:
             logger.debug("Transition to {0}, execute `{1}`".format(str(target), cmd))
             env = os.environ.copy()
-            env.update({ "STATE": str(target) })
+            env.update({"STATE": str(target)})
             with open(os.devnull, "w") as fnull:
-                subprocess.call(cmd, shell = True, stdout = fnull, stderr = fnull,
-                                env = env)
+                subprocess.call(
+                    cmd, shell=True, stdout=fnull, stderr=fnull, env=env)
 
         return target
 
